@@ -1,0 +1,20 @@
+{
+  "name": "agy-orchestrator-marketplace",
+  "description": "Self-hosted marketplace for the agy-orchestrator plugin (Claude Code orchestrator + agy CLI worker pattern).",
+  "owner": {
+    "name": "Duc Anh",
+    "email": "anhnd3005@infinitytech.global"
+  },
+  "plugins": [
+    {
+      "name": "agy-orchestrator",
+      "description": "Claude Code as orchestrator, Antigravity CLI (agy) headless sessions as external workers, coordinated via a file-based .agents/ ledger.",
+      "version": "0.1.0",
+      "source": "./",
+      "author": {
+        "name": "Duc Anh",
+        "email": "anhnd3005@infinitytech.global"
+      }
+    }
+  ]
+}
