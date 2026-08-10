@@ -83,6 +83,17 @@ Real product files go in a sibling `workspace/` dir, never inside `.agents/`
 
 ## The Process
 
+0. **Clarify with the human before dispatching anything.** Same discipline
+   as `superpowers:brainstorming`/`writing-plans`: if the request leaves
+   real room for interpretation — scope ("simple" can mean a bare page or a
+   full design system), style/aesthetic, what counts as done, how many
+   workers/tabs/whatever — ask before writing `BRIEFING.md`, not after the
+   worker returns something the human didn't ask for. Skip this step only
+   when the task is already fully specified or is a repeat of a task type
+   already clarified earlier in this session. Getting a confidently wrong
+   BRIEFING to the worker fast is not faster than getting a right one to it
+   five minutes later — the worker's tokens and the review cycle are not
+   free, and re-dispatching after a mismatch costs more than asking upfront.
 1. **Brief the worker.** Write `.agents/worker_agy_N/BRIEFING.md`: exact task,
    constraints ("only touch files under `workspace/`"), expected output.
 2. **Dispatch.**
