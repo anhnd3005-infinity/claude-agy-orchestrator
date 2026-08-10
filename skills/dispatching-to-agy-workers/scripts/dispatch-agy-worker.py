@@ -57,9 +57,12 @@ def main():
     agy = shutil.which("agy")
     if not agy:
         fail(
-            "agy not found on PATH. Install: "
-            "curl -fsSL https://antigravity.google/cli/install.sh | bash "
-            "(or the Windows equivalent from https://antigravity.google/cli/install)"
+            "agy not found on PATH. Install:\n"
+            "  macOS/Linux:       curl -fsSL https://antigravity.google/cli/install.sh | bash\n"
+            "  Windows PowerShell: irm https://antigravity.google/cli/install.ps1 | iex\n"
+            "  Windows CMD:        curl -fsSL https://antigravity.google/cli/install.cmd "
+            "-o install.cmd && install.cmd && del install.cmd\n"
+            "  Docs: https://antigravity.google/docs/cli/install"
         )
 
     record_dir.mkdir(parents=True, exist_ok=True)

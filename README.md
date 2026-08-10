@@ -1,7 +1,7 @@
 # agy-orchestrator
 
-Claude Code as orchestrator, [agy](https://antigravity.google) (Antigravity
-CLI) headless sessions as external workers — coordinated through a
+Claude Code as orchestrator, [agy](https://antigravity.google/docs/cli/install)
+(Antigravity CLI) headless sessions as external workers — coordinated through a
 file-based `.agents/` ledger. Claude clarifies scope with the human before
 dispatching anything, always self-checks a worker's output directly, and
 reserves a full independent Claude-subagent review for tasks that meet a
@@ -55,11 +55,29 @@ flowchart TD
 ## Install on any machine
 
 Requirements: [Claude Code](https://claude.com/claude-code) and
-[agy](https://antigravity.google/cli/install) both installed. On **Windows**,
-that's it — the dispatch script has a pure-Python twin
-(`dispatch-agy-worker.py`), so no WSL or Git Bash is required just for this
-plugin (Claude Code itself may still need one of those for its own Bash
-tool, independent of this plugin).
+[agy](https://antigravity.google/docs/cli/install) (Antigravity CLI) both
+installed:
+
+```bash
+# macOS / Linux
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
+
+```powershell
+# Windows — PowerShell
+irm https://antigravity.google/cli/install.ps1 | iex
+```
+
+```cmd
+:: Windows — Command Prompt
+curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd
+```
+
+On **Windows**, that's the only extra step — the dispatch script has a
+pure-Python twin (`dispatch-agy-worker.py`), so no WSL or Git Bash is
+required just for this plugin (Claude Code itself may still need one of
+those for its own Bash tool, independent of this plugin). Verify either
+install with `agy --help`.
 
 ```
 /plugin marketplace add https://github.com/anhnd3005-infinity/claude-agy-orchestrator.git
