@@ -11,9 +11,11 @@ Requirements: [Claude Code](https://claude.com/claude-code) and
 [agy](https://antigravity.google/cli/install) both installed.
 
 ```
-/plugin marketplace add <this-repo-url>
+/plugin marketplace add git@github.com:anhnd3005-infinity/claude-agy-orchestrator.git
 /plugin install agy-orchestrator@agy-orchestrator-marketplace
 ```
+
+(HTTPS works too: `https://github.com/anhnd3005-infinity/claude-agy-orchestrator.git`)
 
 That's it — the skill `dispatching-to-agy-workers` and its dispatch script
 are now available in any Claude Code session on that machine.
