@@ -10,8 +10,10 @@ description: Use when you want Claude Code to act as orchestrator and dispatch e
 Claude Code (you) stays the **orchestrator**. Each **worker** is a separate
 `agy` (Antigravity CLI, Google) process, launched headless via `--print`, run
 as an external tool through the Bash tool — not a native Claude subagent.
-An independent **Claude subagent** (Agent tool) reviews every worker's claim
-before you trust it.
+You always spot-check the worker's claim yourself (cheap); an independent
+**Claude subagent** reviewer is reserved for tasks that matter (see Review
+Policy) — dispatching a full reviewer for every trivial task is pure
+overhead, not safety.
 
 This is a different shape than `superpowers:dispatching-parallel-agents` or
 `superpowers:subagent-driven-development`: those dispatch *native, homogeneous*
@@ -67,8 +69,10 @@ compaction, session restart, or a different machine picking up the work):
 │   ├── DISPATCH.md          # auto-written by dispatch-agy-worker.sh
 │   ├── progress.md          # auto-written; agy's self-reported status
 │   ├── agy_raw_output.json  # raw --output-format json response
-│   └── handoff.md           # orchestrator writes after reviewing: verdict
-└── reviewer_N/
+│   └── handoff.md           # orchestrator writes: self-check result +
+│                             #   verdict, and whether a reviewer was used
+└── reviewer_N/               # OPTIONAL — only for tasks that meet the
+                               # Review Policy bar below
     ├── BRIEFING.md          # orchestrator writes: what to verify, how
     ├── review.md            # reviewer writes: findings
     └── handoff.md           # reviewer writes: ends with "VERDICT: PASS/FAIL"
@@ -94,16 +98,44 @@ Real product files go in a sibling `workspace/` dir, never inside `.agents/`
 3. **Never dispatch two agy workers at the same absolute workspace path
    concurrently** — same reasoning as never running two implementers on the
    same files in `subagent-driven-development`: conflicting writes, no lock.
-4. **Review — always, no exceptions.** Dispatch a Claude subagent (Agent
-   tool, `general-purpose` is fine) with a `reviewer_N/BRIEFING.md` that says:
-   read the worker's files, then **independently** inspect the actual
-   workspace files and re-run/re-check the claim yourself — do not just
-   parse `agy_raw_output.json` and trust `status`. The reviewer's
-   `handoff.md` must end with `VERDICT: PASS` or `VERDICT: FAIL` plus a
-   one-sentence reason.
-5. **Gate.** Update `.agents/orchestrator/GATE_STATUS.md` with every
-   worker/reviewer pair. Only report the task done to the human once the
-   reviewer's verdict is PASS.
+4. **Self-check — always, no exceptions, but cheap.** Before writing
+   `handoff.md`, YOU (the orchestrator) directly inspect what the worker
+   actually produced — `ls`/`cat` the file, run it, diff it, whatever takes
+   one or two tool calls. Never accept `agy_raw_output.json`'s `status`
+   field alone: it reported `SUCCESS` even the time the file landed in the
+   wrong directory entirely (see the `--add-dir` gotcha above). This step
+   is not optional and does not need a subagent.
+5. **Independent reviewer subagent — only for tasks that meet the bar.**
+   Dispatch a Claude subagent (Agent tool) with a `reviewer_N/BRIEFING.md`
+   when **any** of these are true:
+   - The output will be relied on without the human re-checking it (feeds
+     an automated next step, gets committed/shipped, or you'll report it
+     done and move on).
+   - The task involves non-trivial logic where a plausible-looking wrong
+     answer is easy to miss by eyeballing (not just "does the file exist").
+   - It's one of the first few dispatches of a new *kind* of task — spend
+     the review budget to calibrate whether this task type is reliable
+     before trusting it lower-touch.
+   - It touches shared/production code or data, or anything costly to
+     get wrong.
+   - The human explicitly flagged the task as important.
+
+   **Skip the reviewer subagent** (self-check from step 4 is enough) for
+   scratch/exploratory work, mechanical tasks you can fully verify yourself
+   in one command, and repeat dispatches of a task type that has already
+   passed reviewer verification several times with no surprises.
+
+   Don't let "it worked last time" quietly become the excuse to stop
+   self-checking too — step 4 never goes away, only step 5 is conditional.
+
+   When used: the reviewer independently inspects the actual workspace
+   files and re-runs/re-checks the claim itself — never just re-parses
+   `agy_raw_output.json`. Its `handoff.md` must end with `VERDICT: PASS` or
+   `VERDICT: FAIL` plus a one-sentence reason.
+6. **Gate.** Update `.agents/orchestrator/GATE_STATUS.md` for every worker
+   (self-check result, and reviewer verdict if one was dispatched — write
+   `reviewer: skipped (self-checked)` when step 5 didn't apply). Only
+   report the task done to the human once this line is clean.
 
 ## Confidence notes (as of 2026-08-10)
 
