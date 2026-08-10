@@ -148,6 +148,39 @@ Real product files go in a sibling `workspace/` dir, never inside `.agents/`
    `reviewer: skipped (self-checked)` when step 5 didn't apply). Only
    report the task done to the human once this line is clean.
 
+## Lessons from real dispatches (running log)
+
+Append to this list when a dispatch teaches you something non-obvious —
+that's the point of keeping this skill in one file instead of re-learning
+it every session.
+
+- **2026-08-10, hello.py smoke test:** `agy --print` without `--add-dir`
+  reported `SUCCESS` while writing into its own scratch dir, not the
+  workspace asked for. → the `--add-dir` gotcha above; script now bakes it
+  in.
+- **2026-08-10, helloworld-tabs-demo:** two more lessons from one dispatch:
+  - **Self-check with a naive substring match can false-negative.**
+    Grepping the produced HTML for the literal string "Hello World" found
+    nothing, because the worker had written
+    `<h1>Hello <span class="gradient-text">World!</span></h1>` — the text
+    was real and correctly displayed, just split by a tag. Self-check for
+    *rendered/semantic* content, not raw substrings, before concluding
+    something is missing.
+  - **"SUCCESS" can hide scope creep, not just wrong location.** Asked for
+    a "simple" hello-world page; got a full "Premium Dark & Glassmorphism"
+    design system with an external CDN dependency (Google Fonts, Font
+    Awesome) nobody asked for. Nothing was *broken* — `status: SUCCESS`
+    was accurate this time — but the result didn't match intent. This is
+    exactly what step 0 (clarify first) exists to prevent, and exactly
+    what self-check should flag even when the worker's own report reads
+    clean: note surprises (unrequested dependencies, scope beyond the
+    brief), not just pass/fail.
+  - When asked, the human owns the final call on both directions: keep an
+    over-delivered result as-is, or skip a reviewer step the policy would
+    otherwise recommend. Record whichever they choose in `handoff.md` /
+    `GATE_STATUS.md` — don't let an explicit human decision look like a
+    process gap on paper later.
+
 ## Confidence notes (as of 2026-08-10)
 
 `agy` is a very new CLI (Google, ~May 2026). Community reports (GitHub
