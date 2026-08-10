@@ -71,8 +71,18 @@ Claude will then, on its own: write a `BRIEFING.md`, call
 result, and only spin up an independent reviewer subagent if the task meets
 the importance bar in `SKILL.md`.
 
-To force it explicitly (skip the auto-match), just say: *"use the
-dispatching-to-agy-workers skill for this."*
+To force it explicitly (skip the auto-match), either say *"use the
+dispatching-to-agy-workers skill for this"*, or use the bundled slash
+command:
+
+```
+/agy-dispatch Tạo file X, chạy thử, báo kết quả cho tôi.
+```
+
+`/agy-dispatch` always routes through the skill — it never silently falls
+back to doing the task natively in Claude. Add "quan trọng"/"important" in
+the task text to force the independent reviewer subagent regardless of the
+skill's normal importance-bar check.
 
 You can also read the full pattern yourself first:
 `skills/dispatching-to-agy-workers/SKILL.md`.
