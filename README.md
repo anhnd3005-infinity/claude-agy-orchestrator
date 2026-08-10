@@ -62,11 +62,13 @@ plugin (Claude Code itself may still need one of those for its own Bash
 tool, independent of this plugin).
 
 ```
-/plugin marketplace add git@github.com:anhnd3005-infinity/claude-agy-orchestrator.git
+/plugin marketplace add https://github.com/anhnd3005-infinity/claude-agy-orchestrator.git
 /plugin install agy-orchestrator@agy-orchestrator-marketplace
 ```
 
-(HTTPS works too: `https://github.com/anhnd3005-infinity/claude-agy-orchestrator.git`)
+Repo is **public** — no SSH key, no GitHub login, no collaborator access
+needed on any machine. (SSH also works if you prefer it and already have a
+GitHub-linked key: `git@github.com:anhnd3005-infinity/claude-agy-orchestrator.git`.)
 
 Check it landed: `/plugin` (or `claude plugin list` from a terminal) should
 show `agy-orchestrator@agy-orchestrator-marketplace` as enabled. Works from
