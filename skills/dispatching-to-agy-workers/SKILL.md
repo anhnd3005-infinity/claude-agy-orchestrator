@@ -50,7 +50,11 @@ own `~/.gemini/antigravity-cli/scratch/` instead of your intended directory —
 3. Never trust `status: SUCCESS` alone — always have a reviewer independently
    check the actual files/output (see Review step below).
 
-Use `scripts/dispatch-agy-worker.sh` — it bakes in both (1) and (2).
+Use `scripts/dispatch-agy-worker.sh` (macOS/Linux/Git-Bash/WSL) or
+`scripts/dispatch-agy-worker.py` (Windows, or anywhere without a POSIX
+shell — identical behavior, no bash required) — either one bakes in both
+(1) and (2). Pick whichever runs on the orchestrating machine; never
+hand-roll the `agy` invocation without one of them.
 
 ## The `.agents/` ledger convention
 
@@ -96,7 +100,7 @@ Real product files go in a sibling `workspace/` dir, never inside `.agents/`
    free, and re-dispatching after a mismatch costs more than asking upfront.
 1. **Brief the worker.** Write `.agents/worker_agy_N/BRIEFING.md`: exact task,
    constraints ("only touch files under `workspace/`"), expected output.
-2. **Dispatch.**
+2. **Dispatch.** macOS/Linux/Git-Bash/WSL:
    ```bash
    skills/dispatching-to-agy-workers/scripts/dispatch-agy-worker.sh \
      <absolute-workspace-path> \
@@ -104,7 +108,16 @@ Real product files go in a sibling `workspace/` dir, never inside `.agents/`
      "<task prompt>" \
      [timeout, default 5m]
    ```
-   This writes `DISPATCH.md`, `progress.md`, and `agy_raw_output.json` for
+   Windows (native cmd/PowerShell, no bash needed) or wherever Python is
+   preferred — same arguments, same output files:
+   ```bash
+   python3 skills/dispatching-to-agy-workers/scripts/dispatch-agy-worker.py \
+     <absolute-workspace-path> \
+     .agents/worker_agy_N \
+     "<task prompt>" \
+     [timeout, default 5m]
+   ```
+   Either writes `DISPATCH.md`, `progress.md`, and `agy_raw_output.json` for
    you, and prints the raw JSON to stdout too.
 3. **Never dispatch two agy workers at the same absolute workspace path
    concurrently** — same reasoning as never running two implementers on the
@@ -158,6 +171,11 @@ it every session.
   reported `SUCCESS` while writing into its own scratch dir, not the
   workspace asked for. → the `--add-dir` gotcha above; script now bakes it
   in.
+- **2026-08-10, cross-platform:** `dispatch-agy-worker.sh` is bash — doesn't
+  run on native Windows (cmd/PowerShell) without WSL or Git Bash. Added
+  `dispatch-agy-worker.py`, a behavior-identical port (same args, same
+  output files, verified against the same test task). Pick by platform, not
+  by habit.
 - **2026-08-10, helloworld-tabs-demo:** two more lessons from one dispatch:
   - **Self-check with a naive substring match can false-negative.**
     Grepping the produced HTML for the literal string "Hello World" found

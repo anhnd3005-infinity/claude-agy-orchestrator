@@ -18,7 +18,7 @@ flowchart TD
     U -->|"answers"| O
 
     O -->|"writes"| B[".agents/worker_agy_N/BRIEFING.md"]
-    O -->|"runs"| D["scripts/dispatch-agy-worker.sh"]
+    O -->|"runs"| D["scripts/dispatch-agy-worker.sh\n(or .py on Windows)"]
     D -->|"agy --print --add-dir <workspace> --output-format json"| A["agy — headless worker\n(Gemini-family model)"]
     A -->|"creates/edits files"| W["workspace/"]
     A -->|"JSON: status + response"| R["agy_raw_output.json"]
@@ -55,7 +55,11 @@ flowchart TD
 ## Install on any machine
 
 Requirements: [Claude Code](https://claude.com/claude-code) and
-[agy](https://antigravity.google/cli/install) both installed.
+[agy](https://antigravity.google/cli/install) both installed. On **Windows**,
+that's it — the dispatch script has a pure-Python twin
+(`dispatch-agy-worker.py`), so no WSL or Git Bash is required just for this
+plugin (Claude Code itself may still need one of those for its own Bash
+tool, independent of this plugin).
 
 ```
 /plugin marketplace add git@github.com:anhnd3005-infinity/claude-agy-orchestrator.git
@@ -80,9 +84,10 @@ in the same session where the plugin is installed, e.g.:
 Expect Claude to **ask before it acts** if your request leaves scope, style,
 or "done" ambiguous — that's step 0 of the skill, not a delay. Once scope is
 clear, Claude will: write a `BRIEFING.md`, call
-`scripts/dispatch-agy-worker.sh` with the right `--add-dir`, self-check the
-result itself, and only spin up an independent reviewer subagent if the task
-meets the importance bar in `SKILL.md`.
+`scripts/dispatch-agy-worker.sh` (or `dispatch-agy-worker.py` on Windows)
+with the right `--add-dir`, self-check the result itself, and only spin up
+an independent reviewer subagent if the task meets the importance bar in
+`SKILL.md`.
 
 To force it explicitly (skip the auto-match), either say *"use the
 dispatching-to-agy-workers skill for this"*, or use the bundled slash
@@ -135,8 +140,13 @@ from any project once installed, not just this repo). Asked for "1 website
 ## Known gotchas (see `SKILL.md` for the full, growing log)
 
 - **`--add-dir` is mandatory.** Without it, `agy --print` may write into its
-  own `~/.gemini/antigravity-cli/scratch/` instead of your workspace, while
-  still reporting `SUCCESS`. `dispatch-agy-worker.sh` always sets it.
+  own scratch directory instead of your workspace, while still reporting
+  `SUCCESS`. Both `dispatch-agy-worker.sh` and `dispatch-agy-worker.py`
+  always set it.
+- **The dispatch script is bash — doesn't run natively on Windows** without
+  WSL/Git Bash. `dispatch-agy-worker.py` is a behavior-identical port for
+  Windows (or anywhere without a POSIX shell); same arguments, same output
+  files.
 - **Naive string checks during self-check can false-negative** on content
   split across HTML/markup tags. Verify meaning, not just raw substrings.
 - **`SUCCESS` doesn't mean "matches intent.**" A worker can do exactly what
@@ -152,8 +162,9 @@ from any project once installed, not just this repo). Asked for "1 website
 ## What's in here
 
 - `skills/dispatching-to-agy-workers/` — the skill: `SKILL.md` (process,
-  review policy, the gotcha log) + `scripts/dispatch-agy-worker.sh` (the
-  dispatch wrapper — bakes in `--add-dir` so it can't be forgotten).
+  review policy, the gotcha log) + `scripts/dispatch-agy-worker.sh` and
+  `scripts/dispatch-agy-worker.py` (behavior-identical dispatch wrappers,
+  bash and pure-Python — both bake in `--add-dir` so it can't be forgotten).
 - `commands/agy-dispatch.md` — `/agy-dispatch <task>`, forces the skill to
   handle a task instead of relying on auto-match.
 - `.agents/` — the `hello.py` smoke test run, kept as a worked example.
@@ -183,6 +194,9 @@ for the full reasoning.
 
 ## Version history
 
+- **0.3.0** — cross-platform dispatch: `dispatch-agy-worker.py`, a
+  behavior-identical port of the dispatch script for Windows (or anywhere
+  without bash) — no WSL/Git Bash required just for this plugin.
 - **0.2.0** — step 0 (clarify with the human before dispatching), tiered
   review policy (independent reviewer only above an importance bar, cheap
   self-check always required), `/agy-dispatch` slash command, lessons log

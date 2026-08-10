@@ -16,8 +16,9 @@ Follow that skill's process exactly:
 
 1. Pick (or create) a `.agents/worker_agy_N/` directory and write its
    `BRIEFING.md` from the task above.
-2. Dispatch via `skills/dispatching-to-agy-workers/scripts/dispatch-agy-worker.sh`,
-   with an absolute `--add-dir` workspace path.
+2. Dispatch via `scripts/dispatch-agy-worker.sh` (macOS/Linux/Git-Bash/WSL)
+   or `scripts/dispatch-agy-worker.py` (Windows / no bash available) —
+   pick by platform — with an absolute `--add-dir` workspace path.
 3. Self-check the actual produced files/output yourself — never trust
    `agy_raw_output.json`'s `status` field alone.
 4. Only dispatch an independent Claude reviewer subagent if this task meets
