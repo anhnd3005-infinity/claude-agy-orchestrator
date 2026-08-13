@@ -6,14 +6,17 @@ Pattern này dựng theo cùng convention đã dùng ở
 
 ## Vai trò trong team này
 
-- **orchestrator** — Claude Code (tôi), chạy trực tiếp trong phiên chat này.
-  Đọc `ORIGINAL_REQUEST.md`, chia task, viết `DISPATCH.md` cho từng agent,
-  tổng hợp `handoff.md` của tất cả agent vào `orchestrator/plan.md` +
+- **orchestrator** — Claude Code (tôi), chạy trực tiếp trong phiên chat này,
+  bên trong một phiên **Herdr** (yêu cầu `HERDR_ENV=1`). Đọc
+  `ORIGINAL_REQUEST.md`, chia task, viết `DISPATCH.md` cho từng agent, tổng
+  hợp `handoff.md` của tất cả agent vào `orchestrator/plan.md` +
   `orchestrator/GATE_STATUS.md`.
-- **worker_agy_*** — một phiên **agy** (Antigravity CLI) chạy headless
-  (`agy --print ... --output-format json`), đóng vai trò thực thi/coder.
-  Được orchestrator gọi qua Bash, không có state nội bộ nào ngoài những gì
-  ghi lại trong thư mục của nó.
+- **worker_agy_*** — một agent **agy** (Antigravity CLI) chạy tương tác bên
+  trong 1 pane do **Herdr** quản lý, đóng vai trò thực thi/coder. Được
+  orchestrator điều khiển qua `herdr agent start/prompt/read/send-keys/wait`
+  (không còn headless `agy --print` một lần rồi thoát) — pane sống nên có
+  thể theo dõi trạng thái (`idle`/`working`/`blocked`/`done`) và gửi tiếp
+  prompt mà không cần relaunch.
 - **reviewer_*** — một Claude subagent (qua Agent tool), đóng vai trò kiểm
   tra độc lập kết quả của worker. Không tự sửa code — chỉ chấm & báo cáo.
 - **challenger_*** (thêm khi cần) — Claude subagent cố tình tìm cách bẻ/phản
@@ -34,13 +37,21 @@ Pattern này dựng theo cùng convention đã dùng ở
 ## Cách dispatch một worker_agy
 
 ```bash
-cd /Users/ducanh/Project/Infinity/agy-orchestrator-demo/workspace
-agy --print "<task>" --output-format json --print-timeout 5m > \
-  ../.agents/worker_agy_N/agy_raw_output.json
+skills/dispatching-to-agy-workers/scripts/dispatch-agy-worker.sh \
+  /Users/ducanh/Project/Infinity/agy-orchestrator-demo/workspace \
+  .agents/worker_agy_N \
+  "<task>" \
+  worker_agy_N \
+  300000
 ```
 
-Orchestrator đọc JSON đó (`status`, `response`, `structured_output`), rồi tự
-viết `progress.md` / `handoff.md` diễn giải lại cho người đọc.
+Script tự chạy `herdr pane split` → `herdr agent start --kind agy -- --add-dir
+<workspace>` → `herdr agent prompt --wait`, rồi ghi `DISPATCH.md`,
+`progress.md`, các `herdr_*.json` raw response, và `agent_output.txt` (snapshot
+terminal qua `herdr agent read`). Exit code `2` = worker `blocked`, cần
+orchestrator tự xử qua `herdr agent read/send-keys/prompt` — script không tự
+giải quyết được bước này. Orchestrator đọc các file đó rồi tự viết
+`handoff.md` diễn giải lại cho người đọc, không được tin riêng status string.
 
 ## Ghi chú độ tin cậy (từ research 2026-08-10)
 

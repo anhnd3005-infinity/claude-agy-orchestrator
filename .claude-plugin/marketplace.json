@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "agy-orchestrator",
-      "description": "Claude Code as orchestrator, Antigravity CLI (agy) headless sessions as external workers, coordinated via a file-based .agents/ ledger.",
-      "version": "0.3.0",
+      "description": "Claude Code as orchestrator, Antigravity CLI (agy) agents running in Herdr-managed panes as external workers, coordinated via a file-based .agents/ ledger.",
+      "version": "0.4.0",
       "source": "./",
       "author": {
         "name": "Duc Anh",
