@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Dispatch one task to an agy (Antigravity CLI) worker running INSIDE a
-# Herdr-managed pane, and record a DISPATCH.md/progress.md scaffold for a
-# .agents/ file-based orchestration.
+# Dispatch one task to a CLI agent (any Herdr-supported kind: agy, codex,
+# claude, gemini, ...) running INSIDE a Herdr-managed pane, and record a
+# DISPATCH.md/progress.md scaffold for a .agents/ file-based orchestration.
 #
-# Replaces the old headless `agy --print` approach entirely: the worker now
-# lives in a real, persistent Herdr pane, so the orchestrator can poll its
-# lifecycle (idle/working/blocked/done), read its terminal output, and send
-# follow-up prompts without relaunching anything.
+# The worker lives in a real, persistent Herdr pane, so the orchestrator
+# can poll its lifecycle (idle/working/blocked/done), read its terminal
+# output, and send follow-up prompts without relaunching anything.
 #
 # Usage:
-#   dispatch-agy-worker.sh <workspace_abs_path> <agent_record_dir> <prompt> <agent_name> [timeout_ms]
+#   dispatch-herdr-worker.sh <workspace_abs_path> <agent_record_dir> <prompt> <agent_name> <kind> [timeout_ms]
 #
 #   workspace_abs_path   Absolute path the worker is allowed to read/write.
-#                         Passed to agy's own --add-dir (via `agent start ... -- --add-dir <path>`)
-#                         AND repeated inside the prompt --- agy does NOT use
-#                         the launching process's cwd as its workspace;
-#                         without --add-dir it silently writes into its own
-#                         ~/.gemini/antigravity-cli/scratch/ while still
-#                         reporting status: SUCCESS. Same gotcha as before,
-#                         fixed the same way, just via `agent start`'s
-#                         native-arg passthrough instead of a CLI flag.
+#                         Passed to `herdr pane split --cwd` AND repeated
+#                         inside the prompt. Some kinds ALSO need a native
+#                         workspace-scoping flag on top of cwd (see the
+#                         KIND_NATIVE_ARGS table below) --- e.g. agy does
+#                         not reliably use its launching cwd as its
+#                         workspace without an explicit --add-dir, and will
+#                         silently write into its own scratch dir while
+#                         still reporting success if you skip it. Not every
+#                         kind has this quirk; codex has none known so far.
 #   agent_record_dir      Where to write DISPATCH.md, progress.md, and the
 #                         raw herdr JSON responses (e.g. .agents/worker_agy_2/).
 #   prompt                Task text. The workspace path is prefixed automatically.
@@ -27,19 +27,25 @@
 #                         (must match [a-z][a-z0-9_-]{0,31}, unique among
 #                         live agents). Used to target every later
 #                         `herdr agent ...` call (read/send-keys/prompt/wait).
+#   kind                  Herdr agent kind: agy, codex, claude, gemini, ...
+#                         (run `herdr agent` to see the full supported list).
+#                         Only `agy` and `codex` have been exercised against
+#                         this script so far --- see KIND_NATIVE_ARGS below.
+#                         Any other kind runs with no extra native args
+#                         (cwd-only) until it earns its own case here.
 #   timeout_ms            Optional, default 300000 (5m). Passed to
 #                         `herdr agent prompt --timeout`.
 #
 # Requires: HERDR_ENV=1 (this must run from inside a Herdr-managed pane),
-# `herdr` on PATH, `jq` on PATH, and `agy` installed as a Herdr-recognized
-# agent kind (`herdr agent` lists supported kinds; `agy` is one of them).
+# `herdr` on PATH, `jq` on PATH, and the requested kind's own CLI installed
+# and present in `herdr agent`'s supported kind list.
 #
 # This script only does the deterministic happy path: split pane, start
-# agent, send the first prompt, wait for it to settle, read the result.
-# If the worker ends up `blocked` (agy asking a question, an approval
-# prompt, etc.), this script does NOT try to resolve that --- it reports
-# the blocked status and exits 2. The orchestrator must then take over
-# interactively via `herdr agent read/send-keys/prompt <agent_name>`.
+# agent, send the first prompt, wait for it to settle, read the result. If
+# the worker ends up `blocked` (a question, an approval prompt, etc.), this
+# script does NOT try to resolve that --- it reports the blocked status and
+# exits 2. The orchestrator must then take over interactively via
+# `herdr agent read/send-keys/prompt <agent_name>`.
 
 set -euo pipefail
 
@@ -47,7 +53,8 @@ WORKSPACE_ARG="$1"
 RECORD_DIR="$2"
 TASK="$3"
 AGENT_NAME="$4"
-TIMEOUT_MS="${5:-300000}"
+KIND="$5"
+TIMEOUT_MS="${6:-300000}"
 START_TIMEOUT_MS="${HERDR_START_TIMEOUT_MS:-30000}"
 
 if [ "${HERDR_ENV:-}" != "1" ]; then
@@ -65,14 +72,28 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v agy >/dev/null 2>&1; then
-  echo "ERROR: agy not found on PATH. Install: curl -fsSL https://antigravity.google/cli/install.sh | bash" >&2
-  exit 1
-fi
-
 WORKSPACE="$(cd "$WORKSPACE_ARG" && pwd)"
 mkdir -p "$RECORD_DIR"
 TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+# Per-kind workspace-scoping quirks. Default: nothing extra --- `pane split
+# --cwd` is assumed sufficient. Add a case here only once you've actually
+# verified a kind needs more (same discipline as the agy `--add-dir`
+# finding: verified against real files, not assumed).
+NATIVE_ARGS=()
+case "$KIND" in
+  agy)
+    NATIVE_ARGS=(--add-dir "$WORKSPACE")
+    ;;
+  codex)
+    NATIVE_ARGS=()
+    ;;
+  *)
+    echo "NOTE: kind '$KIND' has no known workspace-scoping quirk yet --- relying on" >&2
+    echo "  --cwd from pane split alone. If this kind silently writes to the wrong" >&2
+    echo "  place, add a case for it in KIND_NATIVE_ARGS (see script header)." >&2
+    ;;
+esac
 
 # Recursive-descent status/pane_id extraction --- doesn't depend on knowing
 # herdr's exact response nesting, just that the key exists somewhere in the
@@ -100,11 +121,12 @@ if [ -z "$PANE_ID" ]; then
   exit 1
 fi
 
-echo "Starting agy agent '$AGENT_NAME' in pane $PANE_ID ..." >&2
+echo "Starting '$KIND' agent '$AGENT_NAME' in pane $PANE_ID ..." >&2
 # A pane fresh out of `pane split` can briefly not be "an available shell"
-# yet --- observed empirically (2026-08-13 smoke test):
+# yet --- observed empirically (2026-08-13 smoke test, agy):
 # {"error":{"code":"agent_pane_busy","message":"... is not an available
-# shell"}} even though the pane has no agent attached. Retry a few times
+# shell"}} even though the pane has no agent attached. This is a Herdr-level
+# pane-lifecycle race, not specific to any one kind --- retry a few times
 # with a short settle delay before giving up. NOTE: herdr writes server
 # errors as JSON to STDERR (exit status 1), not stdout --- a plain
 # `$(cmd)` capture only sees stdout and silently misses the error body, so
@@ -115,7 +137,7 @@ START_RC=1
 START_ERR_FILE="$(mktemp)"
 for attempt in $(seq 1 "$START_ATTEMPTS"); do
   set +e
-  START_JSON="$(herdr agent start "$AGENT_NAME" --kind agy --pane "$PANE_ID" --timeout "$START_TIMEOUT_MS" -- --add-dir "$WORKSPACE" 2>"$START_ERR_FILE")"
+  START_JSON="$(herdr agent start "$AGENT_NAME" --kind "$KIND" --pane "$PANE_ID" --timeout "$START_TIMEOUT_MS" -- "${NATIVE_ARGS[@]}" 2>"$START_ERR_FILE")"
   START_RC=$?
   set -e
   if [ "$START_RC" -eq 0 ]; then
@@ -141,14 +163,14 @@ fi
 echo "Prompting '$AGENT_NAME' and waiting for it to settle (timeout ${TIMEOUT_MS}ms) ..." >&2
 # The first prompt right after `agent start` can race the agent's TUI
 # becoming actually input-ready even though `interactive_ready: true` is
-# already reported --- observed empirically (2026-08-13 smoke test):
+# already reported --- observed empirically (2026-08-13 smoke test, agy):
 # herdr returns {"error":{"code":"agent_prompt_stalled",...}}, status stays
 # idle, state_change_seq doesn't move, and the prompt text never lands in
-# the pane at all. Retry a few times with a short settle delay before
-# giving up --- do NOT treat that error as "nothing to do". NOTE: herdr
-# writes server errors as JSON to STDERR (exit status 1), not stdout --- a
-# plain `$(cmd)` capture only sees stdout and silently misses the error
-# body, so both stdout and stderr are captured here explicitly.
+# the pane at all. This is a Herdr TUI-readiness race, not agy-specific ---
+# retry a few times with a short settle delay before giving up --- do NOT
+# treat that error as "nothing to do". NOTE: herdr writes server errors as
+# JSON to STDERR (exit status 1), not stdout --- both streams captured
+# explicitly here.
 PROMPT_ATTEMPTS=4
 PROMPT_JSON=""
 PROMPT_RC=1
@@ -184,24 +206,24 @@ READ_TEXT="$(herdr agent read "$AGENT_NAME" --source recent-unwrapped --lines 30
 printf '%s\n' "$READ_TEXT" > "$RECORD_DIR/agent_output.txt"
 
 # `agent_prompt_stalled` proved unreliable in practice (2026-08-13 smoke
-# test): it fired on every one of 4 retry attempts even though the prompt
-# HAD landed and the task completed correctly. Trusting the error alone
-# would wrongly report failure; trusting a settled `idle` status alone
-# would repeat the ORIGINAL false-positive bug (idle because nothing ever
-# ran). So require actual delivery evidence: our prompt template always
-# starts with the fixed Vietnamese marker below regardless of task
-# content --- if it never appears in the pane transcript, the prompt never
-# landed, full stop, no matter what any status code says.
+# test, agy): it fired on every one of 4 retry attempts even though the
+# prompt HAD landed and the task completed correctly. Trusting the error
+# alone would wrongly report failure; trusting a settled `idle` status
+# alone would repeat the ORIGINAL false-positive bug (idle because nothing
+# ever ran). So require actual delivery evidence: our prompt template
+# always starts with the fixed Vietnamese marker below regardless of task
+# content or kind --- if it never appears in the pane transcript, the
+# prompt never landed, full stop, no matter what any status code says.
 #
-# Compare with whitespace stripped on both sides: a narrow pane makes agy
-# hard-wrap the marker across multiple lines (e.g. "Trong thư mục" / "tuyệt
-# đối" on separate lines) even under `--source recent-unwrapped`, which
-# only re-joins Herdr's own soft-wrap bookkeeping, not text the app itself
-# already wrapped when rendering at that column width. A single-line
-# substring/grep match would miss that split and false-negative. Stripping
-# only ASCII whitespace bytes (space/tab/CR/LF) is UTF-8-safe: those byte
-# values never appear inside a multi-byte UTF-8 sequence, so Vietnamese
-# diacritics survive intact.
+# Compare with whitespace stripped on both sides: a narrow pane makes the
+# agent's TUI hard-wrap the marker across multiple lines (e.g. "Trong thư
+# mục" / "tuyệt đối" on separate lines) even under `--source
+# recent-unwrapped`, which only re-joins Herdr's own soft-wrap bookkeeping,
+# not text the app itself already wrapped when rendering at that column
+# width. A single-line substring/grep match would miss that split and
+# false-negative. Stripping only ASCII whitespace bytes (space/tab/CR/LF)
+# is UTF-8-safe: those byte values never appear inside a multi-byte UTF-8
+# sequence, so Vietnamese diacritics survive intact.
 READ_COMPACT="$(printf '%s' "$READ_TEXT" | tr -d ' \t\n\r')"
 if ! printf '%s' "$READ_COMPACT" | grep -qF "Trongthưmụctuyệtđối"; then
   STATUS="no_delivery_confirmed"
@@ -212,14 +234,15 @@ fi
   echo
   echo "- **Timestamp:** $TS"
   echo "- **Workspace:** \`$WORKSPACE\`"
+  echo "- **Kind:** \`$KIND\`"
   echo "- **Herdr agent name:** \`$AGENT_NAME\`"
   echo "- **Herdr pane:** \`$PANE_ID\`"
-  echo "- **agy status after wait:** $STATUS"
+  echo "- **Status after wait:** $STATUS"
   echo "- **prompt exit code:** $PROMPT_RC"
   echo "- **Commands used:**"
   echo '```'
   echo "herdr pane split --current --direction right --cwd \"$WORKSPACE\" --no-focus"
-  echo "herdr agent start \"$AGENT_NAME\" --kind agy --pane \"$PANE_ID\" --timeout $START_TIMEOUT_MS -- --add-dir \"$WORKSPACE\""
+  echo "herdr agent start \"$AGENT_NAME\" --kind $KIND --pane \"$PANE_ID\" --timeout $START_TIMEOUT_MS -- ${NATIVE_ARGS[*]}"
   echo "herdr agent prompt \"$AGENT_NAME\" \"$FULL_PROMPT\" --wait --timeout $TIMEOUT_MS"
   echo '```'
   echo "- **Raw responses:** \`herdr_pane_split.json\`, \`herdr_agent_start.json\`, \`herdr_agent_prompt.json\`, \`herdr_agent_get.json\`"
@@ -230,10 +253,10 @@ fi
   echo "# Progress — $(basename "$RECORD_DIR")"
   echo
   echo "- [x] Dispatched at $TS"
-  echo "- Herdr agent: \`$AGENT_NAME\` in pane \`$PANE_ID\`"
-  echo "- agy status: $STATUS (prompt exit code $PROMPT_RC)"
+  echo "- Herdr agent: \`$AGENT_NAME\` (kind \`$KIND\`) in pane \`$PANE_ID\`"
+  echo "- Status: $STATUS (prompt exit code $PROMPT_RC)"
   if [ "$STATUS" = "blocked" ]; then
-    echo "- **BLOCKED** — agy is asking something or waiting on approval."
+    echo "- **BLOCKED** — agent is asking something or waiting on approval."
     echo "  Orchestrator must resolve interactively:"
     echo "  \`herdr agent read $AGENT_NAME --source recent-unwrapped --lines 120\`"
     echo "  then \`herdr agent send-keys $AGENT_NAME ...\` or \`herdr agent prompt $AGENT_NAME \"...\" --wait\`."
@@ -248,7 +271,7 @@ fi
   echo "- Pane \`$PANE_ID\` / agent \`$AGENT_NAME\` left alive for follow-up prompts and self-check reads."
 } > "$RECORD_DIR/progress.md"
 
-echo "Dispatched. status=$STATUS pane=$PANE_ID agent=$AGENT_NAME" >&2
+echo "Dispatched. status=$STATUS kind=$KIND pane=$PANE_ID agent=$AGENT_NAME" >&2
 
 case "$STATUS" in
   idle|done)
@@ -257,6 +280,10 @@ case "$STATUS" in
   blocked)
     echo "BLOCKED — see progress.md for how to resolve." >&2
     exit 2
+    ;;
+  no_delivery_confirmed)
+    echo "NO DELIVERY CONFIRMED — see progress.md for how to resolve." >&2
+    exit 1
     ;;
   *)
     echo "WARNING: unrecognized/unknown status '$STATUS'. Inspect $RECORD_DIR manually." >&2

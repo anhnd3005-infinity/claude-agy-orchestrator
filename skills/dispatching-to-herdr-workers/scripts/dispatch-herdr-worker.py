@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
-"""Cross-platform twin of dispatch-agy-worker.sh --- same behavior, no bash
-required. Use this on Windows (native cmd/PowerShell, no WSL/Git Bash
+"""Cross-platform twin of dispatch-herdr-worker.sh --- same behavior, no
+bash required. Use this on Windows (native cmd/PowerShell, no WSL/Git Bash
 needed) or anywhere Python is preferred over a shell script.
 
-Dispatch one task to an agy (Antigravity CLI) worker running INSIDE a
-Herdr-managed pane, and record a DISPATCH.md/progress.md scaffold for a
-.agents/ file-based orchestration.
+Dispatch one task to a CLI agent (any Herdr-supported kind: agy, codex,
+claude, gemini, ...) running INSIDE a Herdr-managed pane, and record a
+DISPATCH.md/progress.md scaffold for a .agents/ file-based orchestration.
 
-Replaces the old headless `agy --print` approach entirely: the worker now
-lives in a real, persistent Herdr pane, so the orchestrator can poll its
-lifecycle (idle/working/blocked/done), read its terminal output, and send
-follow-up prompts without relaunching anything.
+The worker lives in a real, persistent Herdr pane, so the orchestrator can
+poll its lifecycle (idle/working/blocked/done), read its terminal output,
+and send follow-up prompts without relaunching anything.
 
 Usage:
-    python3 dispatch-agy-worker.py <workspace_abs_path> <agent_record_dir> <prompt> <agent_name> [timeout_ms]
+    python3 dispatch-herdr-worker.py <workspace_abs_path> <agent_record_dir> <prompt> <agent_name> <kind> [timeout_ms]
 
     workspace_abs_path   Absolute path the worker is allowed to read/write.
-                         Passed to agy's own --add-dir (via
-                         `agent start ... -- --add-dir <path>`) AND repeated
-                         inside the prompt --- agy does NOT use the
-                         launching process's cwd as its workspace; without
-                         --add-dir it silently writes into its own scratch
-                         dir while still reporting status: SUCCESS.
+                         Passed to `herdr pane split --cwd` AND repeated
+                         inside the prompt. Some kinds ALSO need a native
+                         workspace-scoping flag on top of cwd (see
+                         KIND_NATIVE_ARGS below) --- e.g. agy does not
+                         reliably use its launching cwd as its workspace
+                         without an explicit --add-dir, and will silently
+                         write into its own scratch dir while still
+                         reporting success if you skip it. Not every kind
+                         has this quirk; codex has none known so far.
     agent_record_dir      Where to write DISPATCH.md, progress.md, and the
                          raw herdr JSON responses (e.g. .agents/worker_agy_2/).
     prompt                Task text. The workspace path is prefixed
@@ -30,18 +32,24 @@ Usage:
                          match [a-z][a-z0-9_-]{0,31}, unique among live
                          agents). Used to target every later
                          `herdr agent ...` call.
+    kind                  Herdr agent kind: agy, codex, claude, gemini, ...
+                         (run `herdr agent` for the full supported list).
+                         Only `agy` and `codex` have been exercised against
+                         this script so far --- see KIND_NATIVE_ARGS below.
+                         Any other kind runs with no extra native args
+                         (cwd-only) until it earns its own entry.
     timeout_ms            Optional, default 300000 (5m). Passed to
                          `herdr agent prompt --timeout`.
 
 Requires: HERDR_ENV=1 (this must run from inside a Herdr-managed pane),
-`herdr` on PATH, and `agy` installed as a Herdr-recognized agent kind
-(`herdr agent` lists supported kinds; `agy` is one of them).
+`herdr` on PATH, and the requested kind's own CLI installed and present in
+`herdr agent`'s supported kind list.
 
 This script only does the deterministic happy path: split pane, start
 agent, send the first prompt, wait for it to settle, read the result. If
-the worker ends up `blocked` (agy asking a question, an approval prompt,
-etc.), this script does NOT try to resolve that --- it reports the blocked
-status and exits 2. The orchestrator must then take over interactively via
+the worker ends up `blocked` (a question, an approval prompt, etc.), this
+script does NOT try to resolve that --- it reports the blocked status and
+exits 2. The orchestrator must then take over interactively via
 `herdr agent read/send-keys/prompt <agent_name>`.
 """
 
@@ -53,6 +61,15 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Per-kind workspace-scoping quirks. Default (kind not listed): nothing
+# extra --- `pane split --cwd` is assumed sufficient. Add an entry here
+# only once you've actually verified a kind needs more (same discipline as
+# the agy `--add-dir` finding: verified against real files, not assumed).
+KIND_NATIVE_ARGS = {
+    "agy": lambda workspace: ["--add-dir", workspace],
+    "codex": lambda workspace: [],
+}
 
 
 def fail(msg):
@@ -101,10 +118,10 @@ def run_herdr(args, record_dir, out_name):
 
 
 def main():
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         fail(
-            "usage: dispatch-agy-worker.py <workspace_abs_path> "
-            "<agent_record_dir> <prompt> <agent_name> [timeout_ms]"
+            "usage: dispatch-herdr-worker.py <workspace_abs_path> "
+            "<agent_record_dir> <prompt> <agent_name> <kind> [timeout_ms]"
         )
 
     if os.environ.get("HERDR_ENV") != "1":
@@ -114,19 +131,25 @@ def main():
     record_dir = Path(sys.argv[2])
     task = sys.argv[3]
     agent_name = sys.argv[4]
-    timeout_ms = sys.argv[5] if len(sys.argv) > 5 else "300000"
+    kind = sys.argv[5]
+    timeout_ms = sys.argv[6] if len(sys.argv) > 6 else "300000"
     start_timeout_ms = os.environ.get("HERDR_START_TIMEOUT_MS", "30000")
 
     herdr = shutil.which("herdr")
     if not herdr:
         fail("herdr not found on PATH.")
-    if not shutil.which("agy"):
-        fail(
-            "agy not found on PATH. Install:\n"
-            "  macOS/Linux:       curl -fsSL https://antigravity.google/cli/install.sh | bash\n"
-            "  Windows PowerShell: irm https://antigravity.google/cli/install.ps1 | iex\n"
-            "  Docs: https://antigravity.google/docs/cli/install"
+
+    native_args_fn = KIND_NATIVE_ARGS.get(kind)
+    if native_args_fn is None:
+        print(
+            f"NOTE: kind '{kind}' has no known workspace-scoping quirk yet --- relying on "
+            "--cwd from pane split alone. If this kind silently writes to the wrong place, "
+            "add an entry for it in KIND_NATIVE_ARGS (see script header).",
+            file=sys.stderr,
         )
+        native_args = []
+    else:
+        native_args = native_args_fn(workspace)
 
     record_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -148,18 +171,21 @@ def main():
     if not pane_id:
         fail("could not extract pane_id from herdr pane split response.")
 
-    print(f"Starting agy agent '{agent_name}' in pane {pane_id} ...", file=sys.stderr)
+    print(f"Starting '{kind}' agent '{agent_name}' in pane {pane_id} ...", file=sys.stderr)
     # A pane fresh out of `pane split` can briefly not be "an available
-    # shell" yet --- observed empirically (2026-08-13 smoke test):
+    # shell" yet --- observed empirically (2026-08-13 smoke test, agy):
     # {"error":{"code":"agent_pane_busy",...}} even though the pane has no
-    # agent attached. Retry a few times with a short settle delay.
+    # agent attached. This is a Herdr-level pane-lifecycle race, not
+    # specific to any one kind --- retry a few times with a short settle
+    # delay before giving up.
     start_attempts = 4
     start_rc = 1
+    start_json = None
     for attempt in range(1, start_attempts + 1):
         start_rc, start_json = run_herdr(
-            [herdr, "agent", "start", agent_name, "--kind", "agy",
+            [herdr, "agent", "start", agent_name, "--kind", kind,
              "--pane", pane_id, "--timeout", start_timeout_ms,
-             "--", "--add-dir", workspace],
+             "--", *native_args],
             record_dir, "herdr_agent_start.json",
         )
         if start_rc == 0:
@@ -180,11 +206,12 @@ def main():
           file=sys.stderr)
     # The first prompt right after `agent start` can race the agent's TUI
     # becoming actually input-ready even though `interactive_ready: true`
-    # is already reported --- observed empirically (2026-08-13 smoke test):
-    # herdr returns {"error":{"code":"agent_prompt_stalled",...}}, status
-    # stays idle, state_change_seq doesn't move, and the prompt text never
-    # lands in the pane at all. Retry a few times with a short settle delay
-    # before giving up --- do NOT treat that error as "nothing to do".
+    # is already reported --- observed empirically (2026-08-13 smoke test,
+    # agy): herdr returns {"error":{"code":"agent_prompt_stalled",...}},
+    # status stays idle, state_change_seq doesn't move, and the prompt
+    # text never lands in the pane at all. This is a Herdr TUI-readiness
+    # race, not agy-specific --- retry a few times with a short settle
+    # delay before giving up --- do NOT treat that error as "nothing to do".
     prompt_attempts = 4
     prompt_rc = 1
     prompt_json = None
@@ -218,22 +245,23 @@ def main():
     (record_dir / "agent_output.txt").write_text(read_text, encoding="utf-8")
 
     # `agent_prompt_stalled` proved unreliable in practice (2026-08-13 smoke
-    # test): it fired on every one of 4 retry attempts even though the
+    # test, agy): it fired on every one of 4 retry attempts even though the
     # prompt HAD landed and the task completed correctly. Trusting the
     # error alone would wrongly report failure; trusting a settled `idle`
     # status alone would repeat the ORIGINAL false-positive bug (idle
     # because nothing ever ran). So require actual delivery evidence: our
     # prompt template always starts with the fixed Vietnamese marker below
-    # regardless of task content --- if it never appears in the pane
-    # transcript, the prompt never landed, full stop, no matter what any
-    # status code says.
+    # regardless of task content or kind --- if it never appears in the
+    # pane transcript, the prompt never landed, full stop, no matter what
+    # any status code says.
     #
     # Compare with whitespace stripped on both sides: a narrow pane makes
-    # agy hard-wrap the marker across multiple lines (e.g. "Trong thư mục"
-    # / "tuyệt đối" on separate lines) even under `recent-unwrapped`, which
-    # only re-joins Herdr's own soft-wrap bookkeeping, not text the app
-    # itself already wrapped when rendering at that column width. A plain
-    # substring check would miss that split and false-negative.
+    # the agent's TUI hard-wrap the marker across multiple lines (e.g.
+    # "Trong thư mục" / "tuyệt đối" on separate lines) even under
+    # `recent-unwrapped`, which only re-joins Herdr's own soft-wrap
+    # bookkeeping, not text the app itself already wrapped when rendering
+    # at that column width. A plain substring check would miss that split
+    # and false-negative.
     read_compact = "".join(read_text.split())
     if "Trongthưmụctuyệtđối" not in read_compact:
         status = "no_delivery_confirmed"
@@ -242,14 +270,15 @@ def main():
 
 - **Timestamp:** {ts}
 - **Workspace:** `{workspace}`
+- **Kind:** `{kind}`
 - **Herdr agent name:** `{agent_name}`
 - **Herdr pane:** `{pane_id}`
-- **agy status after wait:** {status}
+- **Status after wait:** {status}
 - **prompt exit code:** {prompt_rc}
 - **Commands used:**
 ```
 herdr pane split --current --direction right --cwd "{workspace}" --no-focus
-herdr agent start "{agent_name}" --kind agy --pane "{pane_id}" --timeout {start_timeout_ms} -- --add-dir "{workspace}"
+herdr agent start "{agent_name}" --kind {kind} --pane "{pane_id}" --timeout {start_timeout_ms} -- {' '.join(native_args)}
 herdr agent prompt "{agent_name}" "{full_prompt}" --wait --timeout {timeout_ms}
 ```
 - **Raw responses:** `herdr_pane_split.json`, `herdr_agent_start.json`, `herdr_agent_prompt.json`, `herdr_agent_get.json`
@@ -260,7 +289,7 @@ herdr agent prompt "{agent_name}" "{full_prompt}" --wait --timeout {timeout_ms}
     blocked_note = ""
     if status == "blocked":
         blocked_note = (
-            "- **BLOCKED** — agy is asking something or waiting on approval.\n"
+            "- **BLOCKED** — agent is asking something or waiting on approval.\n"
             "  Orchestrator must resolve interactively:\n"
             f"  `herdr agent read {agent_name} --source recent-unwrapped --lines 120`\n"
             f"  then `herdr agent send-keys {agent_name} ...` or "
@@ -278,14 +307,15 @@ herdr agent prompt "{agent_name}" "{full_prompt}" --wait --timeout {timeout_ms}
     progress_md = f"""# Progress — {record_dir.name}
 
 - [x] Dispatched at {ts}
-- Herdr agent: `{agent_name}` in pane `{pane_id}`
-- agy status: {status} (prompt exit code {prompt_rc})
+- Herdr agent: `{agent_name}` (kind `{kind}`) in pane `{pane_id}`
+- Status: {status} (prompt exit code {prompt_rc})
 {blocked_note}- Reviewer MUST independently verify the actual workspace files — do not trust this status string alone.
 - Pane `{pane_id}` / agent `{agent_name}` left alive for follow-up prompts and self-check reads.
 """
     (record_dir / "progress.md").write_text(progress_md, encoding="utf-8")
 
-    print(f"Dispatched. status={status} pane={pane_id} agent={agent_name}", file=sys.stderr)
+    print(f"Dispatched. status={status} kind={kind} pane={pane_id} agent={agent_name}",
+          file=sys.stderr)
 
     if status in ("idle", "done"):
         sys.exit(0)
