@@ -135,28 +135,8 @@ Read `skills/dispatching-to-herdr-workers/SKILL.md` for the full process —
 one file, worth reading end to end once.
 
 ## How it works
+![AI Coding Workflow](./ai_coding_workflow.gif)
 
-```mermaid
-flowchart TD
-    U["You"] -->|"give a task"| C{"Scope clear?"}
-    C -->|"no"| Q["Claude asks first"]
-    Q --> U
-    C -->|"yes"| O["Claude Code\n(orchestrator)"]
-
-    O -->|"dispatch"| W["Worker — agy / codex / ...\nrunning in a Herdr pane"]
-    W -->|"creates/edits files"| F["workspace/"]
-
-    F --> S{"Orchestrator checks\nthe real files itself\n(never trusts a status alone)"}
-    S -->|"routine task"| H["Report back to you"]
-    S -->|"important task"| RV["Independent reviewer\n(separate Claude subagent)"]
-    RV --> H
-    H --> U
-
-    style W fill:#4285f4,color:#fff
-    style O fill:#d97757,color:#fff
-    style RV fill:#d97757,color:#fff
-    style Q fill:#d97757,color:#fff
-```
 
 *(Under the hood, "dispatch" and "checks the real files" are each a small
 sequence of `herdr pane`/`herdr agent` calls with retries and a ledger
