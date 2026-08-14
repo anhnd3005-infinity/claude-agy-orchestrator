@@ -135,7 +135,7 @@ Read `skills/dispatching-to-herdr-workers/SKILL.md` for the full process —
 one file, worth reading end to end once.
 
 ## How it works
-![AI Coding Workflow](./ai_coding_workflow.gif)
+![AI Coding Workflow](./ai_coding_workflow_animated.gif)
 
 
 *(Under the hood, "dispatch" and "checks the real files" are each a small
