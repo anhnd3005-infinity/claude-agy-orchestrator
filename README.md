@@ -257,6 +257,20 @@ them.
   them.
 - **herdr writes errors to stderr, not stdout.** Easy to miss when scripting
   your own `herdr` calls — a plain `$(cmd)` capture only sees stdout.
+- **`--timeout` is capped at 300000 ms (5 min) per call, hard-rejected above
+  that.** Both scripts validate this up front now. For a task expected to
+  run longer, don't raise the number — loop `herdr agent wait <name>
+  --timeout 300000` after dispatch instead. Exit code `3` means exactly
+  this: still working past the given timeout, not a failure.
+- **`done` is not safer to trust than `idle`.** Both are "settled" states
+  per herdr's own docs, and both have independently produced the same
+  false-positive (settled + zero error + completely empty pane). The
+  delivery-marker check applies to both — an earlier revision that scoped
+  it to `idle` only let the `done` case straight through in testing.
+- **Don't drop `--wait` to dodge a flaky stall error.** Tested: without
+  `--wait`, herdr reports success immediately with no way to tell whether
+  the text actually landed. Verified live to be worse, not better — see
+  `SKILL.md`'s Lessons log for the exact repro.
 - **Naive string checks during self-check can false-negative** on content
   split across HTML/markup tags, or across wrapped terminal lines. Verify
   meaning, not just raw substrings — normalize whitespace first if checking
@@ -308,6 +322,15 @@ for the full reasoning.
 
 ## Version history
 
+- **0.4.1** — read https://herdr.dev/docs/agent-automation/ and tested every
+  idea against real dispatches before adopting any of it: added hard
+  `--timeout` bounds validation (3000, 300000] ms with a new `working`
+  exit code (`3`) for legitimately-still-running tasks; tested and
+  rejected dropping `--wait` (made delivery detection strictly worse, not
+  better); documented a new `timeout`/queued-prompt error distinct from
+  `agent_prompt_stalled`; found and fixed a regression where the
+  delivery-marker check only covered `idle`, missing the identical
+  false-positive under `done`.
 - **0.4.0** — replaced headless `agy --print` with Herdr-managed
   interactive panes (lifecycle polling, follow-up prompts, live approval
   instead of `--dangerously-skip-permissions`); found and fixed 3 real
