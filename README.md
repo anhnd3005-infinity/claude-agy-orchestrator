@@ -86,6 +86,28 @@ preferred: `git@github.com:anhnd3005-infinity/claude-agy-orchestrator.git`.)
 should list `agy-orchestrator@agy-orchestrator-marketplace` as enabled.
 Works from **any** project on the machine, not just this repo.
 
+### Updating later
+
+New commits land on `main` over time (see Version history at the bottom).
+You do **not** need to re-add the marketplace or reinstall from scratch —
+two commands:
+
+```
+/plugin marketplace update
+/plugin update agy-orchestrator@agy-orchestrator-marketplace
+```
+
+The first refreshes the marketplace catalog from git (pulls latest
+commits); the second actually installs the new version — running only the
+first does not update the plugin itself. From a plain terminal instead of
+an interactive session (e.g. scripting/CI), use `claude plugin update
+agy-orchestrator@agy-orchestrator-marketplace -y` (the `-y` skips the
+confirmation prompt; it's required outside an interactive session, ignored
+inside one). There's no "update all" — update by plugin name.
+
+✅ **Verify the version landed:** re-run `/plugin` and check the version
+number shown against the one in this README's Version history.
+
 ### You're set up. Try it:
 
 > "Dùng agy làm worker để tạo file hello.py, chạy thử, rồi báo kết quả cho tôi."
