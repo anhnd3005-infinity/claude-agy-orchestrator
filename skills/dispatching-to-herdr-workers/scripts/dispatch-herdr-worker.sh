@@ -62,6 +62,28 @@ if [ "${HERDR_ENV:-}" != "1" ]; then
   exit 1
 fi
 
+# Per https://herdr.dev/docs/agent-automation/: any herdr --timeout value
+# must be > 3000ms and <= 300000ms (5 min) --- values outside that range
+# are rejected by herdr itself, not silently clamped. Validate here with a
+# clear message instead of letting herdr fail cryptically mid-dispatch. For
+# tasks genuinely expected to run longer than 5 minutes, this single-call
+# ceiling means you cannot just pass a bigger number --- poll instead:
+# repeat `herdr agent wait <agent_name> --timeout 300000` in a loop (each
+# call still capped at 5 min, but you can call it as many times as needed).
+HERDR_TIMEOUT_MIN=3000
+HERDR_TIMEOUT_MAX=300000
+for _pair in "TIMEOUT_MS:$TIMEOUT_MS" "START_TIMEOUT_MS:$START_TIMEOUT_MS"; do
+  _name="${_pair%%:*}"
+  _val="${_pair#*:}"
+  if [ "$_val" -le "$HERDR_TIMEOUT_MIN" ] || [ "$_val" -gt "$HERDR_TIMEOUT_MAX" ]; then
+    echo "ERROR: $_name=$_val ms is outside herdr's allowed --timeout range" >&2
+    echo "  ($HERDR_TIMEOUT_MIN, $HERDR_TIMEOUT_MAX] ms. For work expected to take" >&2
+    echo "  longer, don't raise this value further --- loop 'herdr agent wait" >&2
+    echo "  $AGENT_NAME --timeout $HERDR_TIMEOUT_MAX' instead once the worker is dispatched." >&2
+    exit 1
+  fi
+done
+
 if ! command -v herdr >/dev/null 2>&1; then
   echo "ERROR: herdr not found on PATH." >&2
   exit 1
@@ -224,10 +246,31 @@ printf '%s\n' "$READ_TEXT" > "$RECORD_DIR/agent_output.txt"
 # false-negative. Stripping only ASCII whitespace bytes (space/tab/CR/LF)
 # is UTF-8-safe: those byte values never appear inside a multi-byte UTF-8
 # sequence, so Vietnamese diacritics survive intact.
+#
+# Only override when STATUS is `idle` or `done` --- herdr's own docs
+# define `done` as "the same underlying idle state after unseen background
+# work finishes", i.e. a settled state, same as idle. (2026-08-14 smoke
+# test found the exact original bug recurring under `done` specifically:
+# `agent prompt --wait` returned success with a bumped state_change_seq and
+# no error at all, `agent get` reported `done`, yet the pane was
+# completely empty --- scoping the marker-check to `idle` only, as an
+# earlier version of this fix did, let that false positive straight
+# through. Don't narrow this again without re-testing both states.) Per
+# https://herdr.dev/docs/agent-automation/, an explicit `agent read` can
+# return `agent_not_idle` / incomplete alternate-screen history while the
+# agent is genuinely `working` --- so a missing marker while `working` may
+# just mean the read caught it mid-render, not that delivery failed.
+# Forcing `no_delivery_confirmed` in that case would mislabel a legitimately
+# slow, still-running task as a failure. `blocked` is already handled on
+# its own below regardless of the marker.
 READ_COMPACT="$(printf '%s' "$READ_TEXT" | tr -d ' \t\n\r')"
-if ! printf '%s' "$READ_COMPACT" | grep -qF "Trongthưmụctuyệtđối"; then
-  STATUS="no_delivery_confirmed"
-fi
+case "$STATUS" in
+  idle|done)
+    if ! printf '%s' "$READ_COMPACT" | grep -qF "Trongthưmụctuyệtđối"; then
+      STATUS="no_delivery_confirmed"
+    fi
+    ;;
+esac
 
 {
   echo "# Dispatch — $(basename "$RECORD_DIR")"
@@ -266,6 +309,15 @@ fi
     echo "  very likely never received. Inspect \`agent_output.txt\`, and if the"
     echo "  pane is truly still empty, retry manually:"
     echo "  \`herdr agent prompt $AGENT_NAME \"...\" --wait --timeout $TIMEOUT_MS\`."
+  elif [ "$STATUS" = "working" ]; then
+    echo "- **STILL WORKING** — not a failure. The task is legitimately taking"
+    echo "  longer than $TIMEOUT_MS ms (herdr caps a single --timeout at"
+    echo "  $HERDR_TIMEOUT_MAX ms). Poll further, don't re-dispatch:"
+    echo "  \`herdr agent wait $AGENT_NAME --timeout $HERDR_TIMEOUT_MAX\` (repeat as needed)."
+    echo "  Also possible: this agent was already busy with an unrelated prompt"
+    echo "  when dispatched (e.g. a reused agent name) and this task is still"
+    echo "  queued behind it — check \`agent_output.txt\` for a \`▸ ...\` queued"
+    echo "  line above the current output."
   fi
   echo "- Reviewer MUST independently verify the actual workspace files — do not trust this status string alone."
   echo "- Pane \`$PANE_ID\` / agent \`$AGENT_NAME\` left alive for follow-up prompts and self-check reads."
@@ -284,6 +336,10 @@ case "$STATUS" in
   no_delivery_confirmed)
     echo "NO DELIVERY CONFIRMED — see progress.md for how to resolve." >&2
     exit 1
+    ;;
+  working)
+    echo "STILL WORKING past timeout — not a failure, see progress.md to poll further." >&2
+    exit 3
     ;;
   *)
     echo "WARNING: unrecognized/unknown status '$STATUS'. Inspect $RECORD_DIR manually." >&2

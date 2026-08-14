@@ -360,6 +360,63 @@ it every session.
   verify against real files, and update the quirks table and this log with
   whatever you actually observe — don't assume codex behaves like agy, and
   don't assume it behaves perfectly cleanly either.
+- **2026-08-14, read https://herdr.dev/docs/agent-automation/ and tested
+  every idea it suggested before adopting any of it:**
+  - **`--timeout` is hard-bounded to `(3000, 300000]` ms.** Herdr rejects
+    values outside that range rather than clamping. Our old default
+    (300000) sits exactly at the ceiling, which is fine, but nothing
+    stopped a caller from passing something bigger and getting a cryptic
+    failure. Both scripts now validate `timeout_ms` and
+    `HERDR_START_TIMEOUT_MS` up front and fail with a clear message. **For
+    genuinely long tasks, there is no bigger single-call timeout to reach
+    for** — loop `herdr agent wait <agent_name> --timeout 300000` instead
+    of trying to raise this value.
+  - **Tested and rejected: dropping `--wait` to dodge `agent_prompt_stalled`.**
+    Hypothesis was that decoupling submission (`agent prompt` without
+    `--wait`) from waiting (`agent wait` separately) would avoid the
+    5-second-no-change stall check that's produced false failures before.
+    Live test: `agent prompt <name> "<text>"` (no `--wait`) returned
+    `{"...":"agent_prompted"}` — reporting success — **while the pane was
+    still on agy's startup/account-check screen and the text never landed
+    at all.** Without `--wait`, herdr gives zero feedback that delivery
+    failed; it's strictly worse than the current retry+marker-check
+    approach, not better. Kept `--wait`. Recorded here so nobody
+    "optimizes" this away again without re-testing it first.
+  - **New error code found: `{"error":{"code":"timeout","message":"timed
+    out waiting for agent status"}}`**, distinct from
+    `agent_prompt_stalled`. Observed when the target agent was already mid
+    an unrelated task: the new prompt gets silently **queued** (visible in
+    the transcript as a `▸ ...` line under "Press up to edit queued
+    messages") instead of running immediately, and `--wait` can genuinely
+    time out waiting for the queue to clear — this is a real "still busy"
+    condition, not a delivery failure, and should not be blindly retried
+    the way `agent_pane_busy`/`agent_prompt_stalled` are. Relevant mainly
+    to step 2b (sending a follow-up prompt to an *existing* agent): check
+    `herdr agent get <name>` is `idle` first, or expect your follow-up to
+    queue behind whatever it's already doing.
+  - **The idle/done false-positive isn't unique to `idle`.** A follow-up
+    smoke test hit the *exact* original bug again, but this time settled
+    as `done`: `agent prompt --wait` returned success with a bumped
+    `state_change_seq` and no error at all, `agent get` reported `done`,
+    and the pane transcript was still completely empty — nothing was ever
+    typed. An earlier revision of the delivery-marker fix only re-checked
+    the marker when `status == idle`, on the theory that `done` implies
+    real completion; that theory was wrong and let this exact
+    false-positive back through. Fixed by applying the marker check to
+    **both** `idle` and `done` (herdr's own docs describe `done` as "the
+    same underlying idle state after unseen background work finishes" —
+    it was never a materially different state to begin with). Lesson on
+    top of the lesson: a "fix" narrowed from a broader, already-verified
+    check is itself a new claim that needs its own live re-test — it isn't
+    grandfathered in by the original fix's testing.
+  - Net result of this reading-and-testing pass: one genuine improvement
+    shipped (timeout bounds), one plausible optimization tested and
+    correctly discarded (dropping `--wait`), one new error class
+    documented but intentionally not auto-retried (`timeout`/queued), and
+    one self-inflicted regression caught and fixed before it reached
+    main (`idle`-only marker scoping). All four came from combining the
+    doc with live dispatches — reading the doc alone would have shipped
+    the regression.
 
 ## Confidence notes (as of 2026-08-13)
 

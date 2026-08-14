@@ -135,6 +135,28 @@ def main():
     timeout_ms = sys.argv[6] if len(sys.argv) > 6 else "300000"
     start_timeout_ms = os.environ.get("HERDR_START_TIMEOUT_MS", "30000")
 
+    # Per https://herdr.dev/docs/agent-automation/: any herdr --timeout
+    # value must be > 3000ms and <= 300000ms (5 min) --- values outside
+    # that range are rejected by herdr itself, not silently clamped.
+    # Validate here with a clear message instead of letting herdr fail
+    # cryptically mid-dispatch. For tasks genuinely expected to run longer
+    # than 5 minutes, this single-call ceiling means you cannot just pass a
+    # bigger number --- poll instead: repeat
+    # `herdr agent wait <agent_name> --timeout 300000` in a loop (each call
+    # still capped at 5 min, but you can call it as many times as needed).
+    HERDR_TIMEOUT_MIN = 3000
+    HERDR_TIMEOUT_MAX = 300000
+    for label, value in (("timeout_ms", timeout_ms), ("HERDR_START_TIMEOUT_MS", start_timeout_ms)):
+        n = int(value)
+        if n <= HERDR_TIMEOUT_MIN or n > HERDR_TIMEOUT_MAX:
+            fail(
+                f"{label}={n} ms is outside herdr's allowed --timeout range "
+                f"({HERDR_TIMEOUT_MIN}, {HERDR_TIMEOUT_MAX}] ms. For work expected to take "
+                f"longer, don't raise this value further --- loop "
+                f"'herdr agent wait {agent_name} --timeout {HERDR_TIMEOUT_MAX}' instead "
+                "once the worker is dispatched."
+            )
+
     herdr = shutil.which("herdr")
     if not herdr:
         fail("herdr not found on PATH.")
@@ -262,8 +284,26 @@ def main():
     # bookkeeping, not text the app itself already wrapped when rendering
     # at that column width. A plain substring check would miss that split
     # and false-negative.
+    #
+    # Only override when status is `idle` or `done` --- herdr's own docs
+    # define `done` as "the same underlying idle state after unseen
+    # background work finishes", i.e. a settled state, same as idle.
+    # (2026-08-14 smoke test found the exact original bug recurring under
+    # `done` specifically: `agent prompt --wait` returned success with a
+    # bumped state_change_seq and no error at all, `agent get` reported
+    # `done`, yet the pane was completely empty --- scoping the
+    # marker-check to `idle` only, as an earlier version of this fix did,
+    # let that false positive straight through. Don't narrow this again
+    # without re-testing both states.) Per
+    # https://herdr.dev/docs/agent-automation/, an explicit `agent read`
+    # can return `agent_not_idle` / incomplete alternate-screen history
+    # while the agent is genuinely `working` --- so a missing marker while
+    # `working` may just mean the read caught it mid-render, not that
+    # delivery failed. Forcing `no_delivery_confirmed` in that case would
+    # mislabel a legitimately slow, still-running task as a failure.
+    # `blocked` is already handled on its own below regardless of marker.
     read_compact = "".join(read_text.split())
-    if "Trongthưmụctuyệtđối" not in read_compact:
+    if status in ("idle", "done") and "Trongthưmụctuyệtđối" not in read_compact:
         status = "no_delivery_confirmed"
 
     dispatch_md = f"""# Dispatch — {record_dir.name}
@@ -303,6 +343,17 @@ herdr agent prompt "{agent_name}" "{full_prompt}" --wait --timeout {timeout_ms}
             "  pane is truly still empty, retry manually:\n"
             f"  `herdr agent prompt {agent_name} \"...\" --wait --timeout {timeout_ms}`.\n"
         )
+    elif status == "working":
+        blocked_note = (
+            "- **STILL WORKING** — not a failure. The task is legitimately taking\n"
+            f"  longer than {timeout_ms} ms (herdr caps a single --timeout at\n"
+            "  300000 ms). Poll further, don't re-dispatch:\n"
+            f"  `herdr agent wait {agent_name} --timeout 300000` (repeat as needed).\n"
+            "  Also possible: this agent was already busy with an unrelated prompt\n"
+            "  when dispatched (e.g. a reused agent name) and this task is still\n"
+            "  queued behind it — check `agent_output.txt` for a `▸ ...` queued\n"
+            "  line above the current output.\n"
+        )
 
     progress_md = f"""# Progress — {record_dir.name}
 
@@ -325,6 +376,10 @@ herdr agent prompt "{agent_name}" "{full_prompt}" --wait --timeout {timeout_ms}
     elif status == "no_delivery_confirmed":
         print("NO DELIVERY CONFIRMED — see progress.md for how to resolve.", file=sys.stderr)
         sys.exit(1)
+    elif status == "working":
+        print("STILL WORKING past timeout — not a failure, see progress.md to poll further.",
+              file=sys.stderr)
+        sys.exit(3)
     else:
         print(f"WARNING: unrecognized/unknown status '{status}'. Inspect {record_dir} manually.",
               file=sys.stderr)
