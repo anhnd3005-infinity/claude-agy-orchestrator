@@ -116,39 +116,30 @@ one file, worth reading end to end once.
 
 ```mermaid
 flowchart TD
-    U["You (human)"] -->|"gives a task"| CL{"Ambiguous scope /\nstyle / done-criteria /\nwhich kind?"}
-    CL -->|"yes"| Q["Claude asks clarifying\nquestions FIRST"]
+    U["You"] -->|"give a task"| C{"Scope clear?"}
+    C -->|"no"| Q["Claude asks first"]
     Q --> U
-    CL -->|"no — already clear"| O["Claude Code — orchestrator"]
-    U -->|"answers"| O
+    C -->|"yes"| O["Claude Code\n(orchestrator)"]
 
-    O -->|"writes"| B[".agents/worker_<kind>_N/BRIEFING.md"]
-    O -->|"runs"| D["scripts/dispatch-herdr-worker.sh\n(or .py on Windows)"]
-    D -->|"herdr pane split --cwd <workspace>"| PN["fresh Herdr pane"]
-    D -->|"herdr agent start --kind <kind>\n(+ per-kind native args)"| A["worker — agy / codex / ...\ninteractive, inside the pane"]
-    D -->|"herdr agent prompt --wait\n(retries agent_pane_busy /\nagent_prompt_stalled)"| A
-    A -->|"creates/edits files"| W["workspace/"]
-    D -->|"herdr agent get + agent read\n+ delivery-marker check"| R["herdr_*.json +\nagent_output.txt"]
-    D -->|"auto-writes"| P["DISPATCH.md + progress.md"]
+    O -->|"dispatch"| W["Worker — agy / codex / ...\nrunning in a Herdr pane"]
+    W -->|"creates/edits files"| F["workspace/"]
 
-    R --> SC{"Orchestrator self-checks\nthe REAL files itself\n(never trust status alone)"}
-    SC -->|"always — cheap,\nnever skipped"| SC
-    SC --> IMP{"Meets the\nimportance bar?"}
+    F --> S{"Orchestrator checks\nthe real files itself\n(never trusts a status alone)"}
+    S -->|"routine task"| H["Report back to you"]
+    S -->|"important task"| RV["Independent reviewer\n(separate Claude subagent)"]
+    RV --> H
+    H --> U
 
-    IMP -->|"no — trivial /\nrepeat / scratch"| H1["worker handoff.md\nverdict recorded"]
-    IMP -->|"yes — relied on,\nnon-trivial, first-of-\nkind, or shared/prod"| RV["Claude subagent — reviewer\n(independent, re-checks from scratch)"]
-    RV -->|"review.md +\nVERDICT: PASS/FAIL"| H2["reviewer handoff.md"]
-
-    H1 --> G[".agents/orchestrator/GATE_STATUS.md"]
-    H2 --> G
-    G -->|"only reports done\nonce this is clean"| U
-
-    style A fill:#4285f4,color:#fff
+    style W fill:#4285f4,color:#fff
     style O fill:#d97757,color:#fff
     style RV fill:#d97757,color:#fff
     style Q fill:#d97757,color:#fff
-    style PN fill:#34a853,color:#fff
 ```
+
+*(Under the hood, "dispatch" and "checks the real files" are each a small
+sequence of `herdr pane`/`herdr agent` calls with retries and a ledger
+written to `.agents/` — see the full step-by-step process in `SKILL.md` if
+you want that detail.)*
 
 **The rules that matter most:**
 1. **Never trust a status code alone.** Real dispatches caught `agy`
